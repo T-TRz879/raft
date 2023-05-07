@@ -24,6 +24,11 @@ type WithRPCHeader interface {
 
 // AppendEntriesRequest is the command used to append entries to the
 // replicated log.
+/*
+	用途:
+		1.复制日志到follower中
+		2.heartbeat
+*/
 type AppendEntriesRequest struct {
 	RPCHeader
 
@@ -85,6 +90,10 @@ type RequestVoteRequest struct {
 	Candidate []byte
 
 	// Used to ensure safety
+	/* a想得到b的投票，那么以下两种情况b会直接拒绝a的请求
+	1.a的lastLogTerm < b的lastLogTerm
+	2.a的lastLogTerm = b的lastLogTerm && a的lastLogIndex < b的lastLogIndex
+	*/
 	LastLogIndex uint64
 	LastLogTerm  uint64
 
