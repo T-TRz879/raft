@@ -1367,6 +1367,7 @@ func (r *Raft) processHeartbeat(rpc RPC) {
 	}
 }
 
+// 收到来自leader的appendEntries的请求
 // appendEntries is invoked when we get an append entries RPC call. This must
 // only be called from the main thread.
 func (r *Raft) appendEntries(rpc RPC, a *AppendEntriesRequest) {
@@ -1391,6 +1392,7 @@ func (r *Raft) appendEntries(rpc RPC, a *AppendEntriesRequest) {
 
 	// Increase the term if we see a newer one, also transition to follower
 	// if we ever get an appendEntries call
+	// TODO 这里应该是HeartBeat
 	if a.Term > r.getCurrentTerm() || (r.getState() != Follower && !r.candidateFromLeadershipTransfer) {
 		// Ensure transition to follower
 		r.setState(Follower)
@@ -1399,21 +1401,26 @@ func (r *Raft) appendEntries(rpc RPC, a *AppendEntriesRequest) {
 	}
 
 	// Save the current leader
+	// 设置当前的leader地址和id
 	if len(a.Addr) > 0 {
 		r.setLeader(r.trans.DecodePeer(a.Addr), ServerID(a.ID))
 	} else {
 		r.setLeader(r.trans.DecodePeer(a.Leader), ServerID(a.ID))
 	}
 	// Verify the last log entry
+	// TODO HeartBeat应该不需要填prevLogEntry
 	if a.PrevLogEntry > 0 {
 		lastIdx, lastTerm := r.getLastEntry()
 
 		var prevLogTerm uint64
 		if a.PrevLogEntry == lastIdx {
+			// leader的prevLogEntry index正好是follower的末尾Entry index
+			// 需要比对该logEntry对应的任期是否一样
 			prevLogTerm = lastTerm
 
 		} else {
 			var prevLog Log
+			// ?找到a.PrevLogEntry的Index，如果没找到就返回如下报错,需要查看leader如何处理
 			if err := r.logs.GetLog(a.PrevLogEntry, &prevLog); err != nil {
 				r.logger.Warn("failed to get previous log",
 					"previous-index", a.PrevLogEntry,
@@ -1422,9 +1429,10 @@ func (r *Raft) appendEntries(rpc RPC, a *AppendEntriesRequest) {
 				resp.NoRetryBackoff = true
 				return
 			}
+			// 记录找到的a.PrevLogEntry在follower中logEntry对应的任期
 			prevLogTerm = prevLog.Term
 		}
-
+		// 任期不一样
 		if a.PrevLogTerm != prevLogTerm {
 			r.logger.Warn("previous log term mis-match",
 				"ours", prevLogTerm,
@@ -1498,11 +1506,24 @@ func (r *Raft) appendEntries(rpc RPC, a *AppendEntriesRequest) {
 	// Update the commit index
 	if a.LeaderCommitIndex > 0 && a.LeaderCommitIndex > r.getCommitIndex() {
 		start := time.Now()
+		/*
+			每个节点都会维护一个 commitIndex，表示在这个位置之前所有的日志项都已经提交，不会再次被更改。
+			Leader中的commitIndex是全局最新的，因为Leader的commitIndex是通过判断是否将一个日志项成功复制到了多数节点来判断的。
+			当某个日志项成功复制到了多数节点，Leader会更新自己的commitIndex，并把这个变量放入到给Follower的消息中。
+			当 Follower 收到了来自Leader的消息，如果有日志项，就先处理日志项，清除与Leader不一致的日志项，写入新的日志项。
+			LeaderCommit 说明这个位置之前的日志项已经确定不会改变了。
+			如果【日志项最后一个位置】 < LeaderCommit ，就说明自己还没有最新的日志，而自己能够确定的位置就是当前entries的最后一个位置，把commitIndex更新到这个位置就可以了。
+			如果【日志项最后一个位置】 >= LeaderCommit，就说明自己能够确定的位置和Leader是一样的，那么就更新到LeaderCommit这个位置就可以了。
+			这是因为follower的日志中可能会有与leader的日志不同的条目，在leader发给你的条目之后（这些条目都与你的日志中的条目一致）。
+			因为#3决定了你只有在有冲突的条目时才会截断你的日志，那些条目不会被删除，如果leaderCommit超出了领导发给你的条目，你就可能应用不正确的条目。
+		*/
 		idx := min(a.LeaderCommitIndex, r.getLastIndex())
 		r.setCommitIndex(idx)
 		if r.configurations.latestIndex <= idx {
+			// follower将自己的日志项中可以提交的应用自己的状态机中
 			r.setCommittedConfiguration(r.configurations.latest, r.configurations.latestIndex)
 		}
+		// ?
 		r.processLogs(idx, nil)
 		metrics.MeasureSince([]string{"raft", "rpc", "appendEntries", "processLogs"}, start)
 	}

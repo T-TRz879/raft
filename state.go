@@ -53,6 +53,7 @@ type raftState struct {
 	currentTerm uint64
 
 	// Highest committed log entry
+	// 当前server已经提交的最后一条日记索引
 	commitIndex uint64
 
 	// Last applied log to the FSM

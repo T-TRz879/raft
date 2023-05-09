@@ -39,6 +39,12 @@ type AppendEntriesRequest struct {
 	Leader []byte
 
 	// Provide the previous entries for integrity checking
+	/* TODO 为什么要提供PrevLogEntry和PrevLogTerm?
+	 * raft中的机制：强制follower复制leader中的日志，就算follower日志和leader有冲突
+	 * 会有两种情况：
+	 * 		1.复制成功：follower会将PrevLogEntry和PrevLogTerm之后的日志替换成Entries中的日志
+	 * 		2.复制失败：PrevLogEntry和PrevLogTerm没有能够和follower中日志匹配上的，leader需要往前继续找直到有日志和follower中对上的或者全量复制
+	 */
 	PrevLogEntry uint64
 	PrevLogTerm  uint64
 
@@ -46,6 +52,11 @@ type AppendEntriesRequest struct {
 	Entries []*Log
 
 	// Commit index on the leader
+	/* TODO leader发送的commitIndex是多少，follower就设置为多少,这里是为了保证follower的commitIndex和leader一致
+	 * 		万一leader的commitIndex比follower的commitIndex小，follower会不会出现问题？
+	 *
+	 */
+	// leader告诉follower LeaderCommitIndex之前的日志都可以应用到自己的状态机中
 	LeaderCommitIndex uint64
 }
 
@@ -91,9 +102,10 @@ type RequestVoteRequest struct {
 
 	// Used to ensure safety
 	/* a想得到b的投票，那么以下两种情况b会直接拒绝a的请求
-	1.a的lastLogTerm < b的lastLogTerm
-	2.a的lastLogTerm = b的lastLogTerm && a的lastLogIndex < b的lastLogIndex
-	*/
+	 *	1.a的lastLogTerm < b的lastLogTerm
+	 *	2.a的lastLogTerm = b的lastLogTerm && a的lastLogIndex < b的lastLogIndex
+	 */
+	// 这两个字段保证了选举出的leader拥有最新的日志
 	LastLogIndex uint64
 	LastLogTerm  uint64
 
