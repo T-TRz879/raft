@@ -52,11 +52,13 @@ type raftState struct {
 	// The current term, cache of StableStore
 	currentTerm uint64
 
+	// TODO 提交：保存在server的log中；应用：将日志应用到自己的状态机中
 	// Highest committed log entry
-	// 当前server已经提交的最后一条日记索引
+	// 提交到自己log中的最后一条日志index
 	commitIndex uint64
 
 	// Last applied log to the FSM
+	// 应用到状态机中的最后一条日志的index
 	lastApplied uint64
 
 	// protects 4 next fields

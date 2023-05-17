@@ -112,6 +112,7 @@ type RequestVoteRequest struct {
 	// Used to indicate to peers if this vote was triggered by a leadership
 	// transfer. It is required for leadership transfer to work, because servers
 	// wouldn't vote otherwise if they are aware of an existing leader.
+	// 该字段用于标识该投票请求是否是由于leader变化而发起的,其它server发现有leader存在时不会投票
 	LeadershipTransfer bool
 }
 

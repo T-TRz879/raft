@@ -1442,6 +1442,7 @@ func (r *Raft) appendEntries(rpc RPC, a *AppendEntriesRequest) {
 		}
 	}
 
+	// TODO HeartBeat应该不需要填Entries
 	// Process any new entries
 	if len(a.Entries) > 0 {
 		start := time.Now()
@@ -1601,6 +1602,11 @@ func (r *Raft) requestVote(rpc RPC, req *RequestVoteRequest) {
 			return
 		}
 	}
+	/*
+	 * ?
+	 * 领导层发起的领导权转移, 会将领导权转移标志位设置为true, 这时候就会允许其他节点投票, 从而选举出新的领导者, 从而完成领导权转移,
+	 * 但是这个过程中, 旧的领导者还是会继续处理客户端的请求, 直到新的领导者选举出来
+	 */
 	if leaderAddr, leaderID := r.LeaderWithID(); leaderAddr != "" && leaderAddr != candidate && !req.LeadershipTransfer {
 		r.logger.Warn("rejecting vote request since we have a leader",
 			"from", candidate,
@@ -1610,6 +1616,7 @@ func (r *Raft) requestVote(rpc RPC, req *RequestVoteRequest) {
 	}
 
 	// Ignore an older term
+	// 我的任期比你的任期大，我就不投票
 	if req.Term < r.getCurrentTerm() {
 		return
 	}
@@ -1648,6 +1655,7 @@ func (r *Raft) requestVote(rpc RPC, req *RequestVoteRequest) {
 	}
 
 	// Check if we've voted in this election before
+	// 之前已经投过票了，我就不投票
 	if lastVoteTerm == req.Term && lastVoteCandBytes != nil {
 		r.logger.Info("duplicate requestVote for same term", "term", req.Term)
 		if bytes.Equal(lastVoteCandBytes, candidateBytes) {
@@ -1658,6 +1666,7 @@ func (r *Raft) requestVote(rpc RPC, req *RequestVoteRequest) {
 	}
 
 	// Reject if their term is older
+	// 日志term比我小，我就不投票
 	lastIdx, lastTerm := r.getLastEntry()
 	if lastTerm > req.LastLogTerm {
 		r.logger.Warn("rejecting vote request since our last term is greater",
@@ -1667,6 +1676,7 @@ func (r *Raft) requestVote(rpc RPC, req *RequestVoteRequest) {
 		return
 	}
 
+	// 日志term一样，但是日志index比我小，我就不投票
 	if lastTerm == req.LastLogTerm && lastIdx > req.LastLogIndex {
 		r.logger.Warn("rejecting vote request since our last index is greater",
 			"candidate", candidate,
@@ -1676,6 +1686,7 @@ func (r *Raft) requestVote(rpc RPC, req *RequestVoteRequest) {
 	}
 
 	// Persist a vote for safety
+	// 保存投票信息，一是为了记录，二是为了防止重复投票
 	if err := r.persistVote(req.Term, candidateBytes); err != nil {
 		r.logger.Error("failed to persist vote", "error", err)
 		return
@@ -1993,6 +2004,7 @@ func (r *Raft) initiateLeadershipTransfer(id *ServerID, address *ServerAddress) 
 
 // timeoutNow is what happens when a server receives a TimeoutNowRequest.
 func (r *Raft) timeoutNow(rpc RPC, req *TimeoutNowRequest) {
+	// 一旦超时，就立即转换为候选人; 就把自己状态中的leader清空
 	r.setLeader("", "")
 	r.setState(Candidate)
 	r.candidateFromLeadershipTransfer = true
